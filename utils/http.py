@@ -118,6 +118,7 @@ async def fetch_json(
 async def fetch_twse_data(
     endpoint: str,
     params: Dict[str, str],
+    use_rwd: bool = False,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -126,13 +127,20 @@ async def fetch_twse_data(
     Args:
         endpoint: API 端點名稱（如 "BFI82U", "T86"）
         params: 查詢參數
+        use_rwd: 是否使用 RWD 端點（支援歷史資料，使用 date 參數）
         **kwargs: 傳遞給 fetch_json 的額外參數
         
     Returns:
         Dict: API 回應資料
     """
-    # 建構 URL
-    base_url = "https://www.twse.com.tw/fund"
+    # 根據 use_rwd 選擇端點
+    if use_rwd:
+        # RWD 端點：支援歷史資料，使用 date 參數
+        base_url = "https://www.twse.com.tw/rwd/zh/fund"
+    else:
+        # 舊端點：使用 dayDate 參數
+        base_url = "https://www.twse.com.tw/fund"
+    
     param_str = "&".join(f"{k}={v}" for k, v in params.items())
     url = f"{base_url}/{endpoint}?response=json&{param_str}"
     

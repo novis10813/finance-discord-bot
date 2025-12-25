@@ -29,5 +29,12 @@ COGS_DIR = os.getenv("COGS_DIR", "cogs")
 AUTO_LOAD_COGS = os.getenv("AUTO_LOAD_COGS", "True").lower() == "true"
 CHIP_CHANNEL_ID = int(os.getenv("CHIP_CHANNEL_ID", ""))
 
+# 籌碼分析頻道限制（逗號分隔的頻道 ID，空字串表示不限制）
+CHIP_ALLOWED_CHANNELS_STR = os.getenv("CHIP_ALLOWED_CHANNELS", "")
+CHIP_ALLOWED_CHANNELS = set(
+    int(ch_id.strip()) for ch_id in CHIP_ALLOWED_CHANNELS_STR.split(",") 
+    if ch_id.strip()
+) if CHIP_ALLOWED_CHANNELS_STR else set()
+
 # 排程器設定
 SCHEDULER_TASKS_FILE = os.getenv("SCHEDULER_TASKS_FILE", "data/scheduled_tasks.json")

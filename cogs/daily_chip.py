@@ -10,6 +10,7 @@ from config import CHIP_CHANNEL_ID
 from utils.logger import setup_logger
 from utils.http import fetch_twse_data, HTTPError, APIError
 from utils.cache import get_cache
+from utils.checks import is_chip_channel
 
 logger = setup_logger("cogs.daily_chip")
 
@@ -32,6 +33,23 @@ class DailyChip(commands.Cog):
     async def cog_unload(self):
         """Cog 卸載時執行"""
         self.daily_report_task.cancel()
+    
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+        """
+        處理指令錯誤
+        """
+        # 只處理此 Cog 的指令
+        if ctx.command and ctx.command.cog != self:
+            return
+        
+        # 處理頻道檢查失敗
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("❌ 此指令只能在特定頻道使用")
+            return
+        
+        # 其他錯誤繼續傳遞
+        raise error
             
     async def fetch_chip_data(self, date_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -54,6 +72,7 @@ class DailyChip(commands.Cog):
             return cached_data
             
         try:
+            # 舊端點 + dayDate 參數
             data = await fetch_twse_data("BFI82U", {"dayDate": date_str})
             # 寫入快取
             cache.set(cache_key, data, date_str)
@@ -78,21 +97,32 @@ class DailyChip(commands.Cog):
         if not date_str:
             date_str = datetime.now(TW_TZ).strftime("%Y%m%d")
         
-        # 嘗試從快取取得
         cache = get_cache()
+        
+        # 先嘗試用請求日期查快取
         cache_key = f"T86_{date_str}"
         cached_data = cache.get(cache_key)
         if cached_data:
-            return cached_data
+            # 驗證快取資料的日期是否匹配
+            if cached_data.get("date") == date_str:
+                return cached_data
+            # 日期不匹配，視為快取無效
             
         try:
+            # 使用 RWD 端點 + date 參數（支援歷史資料）
             data = await fetch_twse_data(
                 "T86", 
-                {"selectType": "ALL", "dayDate": date_str},
-                timeout=30.0  # T86 資料較大，增加 timeout
+                {"selectType": "ALL", "date": date_str},
+                use_rwd=True,
+                timeout=30.0
             )
-            # 寫入快取
-            cache.set(cache_key, data, date_str)
+            
+            # 只用 API 回傳的實際日期作為快取 key
+            actual_date = data.get("date", "")
+            if actual_date:
+                actual_cache_key = f"T86_{actual_date}"
+                cache.set(actual_cache_key, data, actual_date)
+            
             return data
         except (HTTPError, APIError) as e:
             logger.warning(f"取得個股籌碼資料失敗: {e.message} (日期: {date_str})")
@@ -283,6 +313,7 @@ class DailyChip(commands.Cog):
         await self.bot.wait_until_ready()
 
     @commands.command(name="daily_chip", aliases=["chip"])
+    @is_chip_channel()
     async def manual_chip(self, ctx: commands.Context, date_str: str = None):
         """
         手動觸發籌碼分析查詢
@@ -306,6 +337,7 @@ class DailyChip(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="chip_stock", aliases=["chip_detail", "股票籌碼"])
+    @is_chip_channel()
     async def stock_chip_detail(self, ctx: commands.Context, stock_code: str, date_str: str = None):
         """
         查詢個股籌碼詳情
@@ -421,6 +453,195 @@ class DailyChip(commands.Cog):
             value=f"`{format_num(total_net)}` 股",
             inline=False
         )
+        
+        embed.set_footer(text="資料來源: 證交所 T86")
+        
+        await ctx.send(embed=embed)
+
+    @commands.command(name="chip_compare", aliases=["籌碼對比"])
+    @is_chip_channel()
+    async def chip_compare(self, ctx: commands.Context, date1: str, date2: str):
+        """
+        對比兩個日期的籌碼資料
+        
+        Args:
+            date1: 第一個日期 (YYYYMMDD)
+            date2: 第二個日期 (YYYYMMDD)
+        """
+        await ctx.send(f"正在對比 {date1} 和 {date2} 的籌碼資料...")
+        
+        # 取得兩個日期的資料
+        data1 = await self.fetch_chip_data(date1)
+        data2 = await self.fetch_chip_data(date2)
+        
+        if not data1 or not data2:
+            await ctx.send(f"無法取得完整資料，請確認日期是否正確")
+            return
+        
+        # 格式化日期顯示
+        date1_display = f"{date1[:4]}/{date1[4:6]}/{date1[6:]}"
+        date2_display = f"{date2[:4]}/{date2[4:6]}/{date2[6:]}"
+        
+        embed = discord.Embed(
+            title="📊 籌碼資料對比",
+            description=f"對比 {date1_display} vs {date2_display}",
+            color=discord.Color.purple(),
+            timestamp=datetime.now(TW_TZ)
+        )
+        
+        # 解析並比較
+        def parse_amount(s: str) -> int:
+            try:
+                return int(s.replace(",", ""))
+            except:
+                return 0
+        
+        records1 = data1.get("data", [])
+        records2 = data2.get("data", [])
+        
+        compare_text = ""
+        for i, (r1, r2) in enumerate(zip(records1, records2)):
+            name = r1[0]
+            diff1 = parse_amount(r1[3])
+            diff2 = parse_amount(r2[3])
+            change = diff2 - diff1
+            
+            emoji = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+            compare_text += f"{emoji} **{name}**\n"
+            compare_text += f"  {date1_display}: `{r1[3]}`\n"
+            compare_text += f"  {date2_display}: `{r2[3]}`\n"
+            compare_text += f"  變化: `{change:+,}`\n\n"
+        
+        embed.add_field(name="三大法人買賣超變化", value=compare_text, inline=False)
+        embed.set_footer(text="資料來源: 證交所 BFI82U")
+        
+        await ctx.send(embed=embed)
+
+    @commands.command(name="chip_trend", aliases=["籌碼趨勢"])
+    @is_chip_channel()
+    async def chip_trend(self, ctx: commands.Context, stock_code: str, investor_type: str = "全部", days: int = 5):
+        """
+        查詢個股籌碼趨勢
+        
+        Args:
+            stock_code: 股票代碼
+            investor_type: 法人類型 (外資/投信/自營商/全部)
+            days: 查詢天數 (預設 5 天)
+        """
+        # 標準化法人類型
+        investor_map = {
+            "外資": ("外資", 4),
+            "外": ("外資", 4),
+            "foreign": ("外資", 4),
+            "投信": ("投信", 10),
+            "信": ("投信", 10),
+            "trust": ("投信", 10),
+            "自營商": ("自營商", 11),
+            "自營": ("自營商", 11),
+            "自": ("自營商", 11),
+            "dealer": ("自營商", 11),
+            "全部": ("三大法人合計", -1),
+            "合計": ("三大法人合計", -1),
+            "all": ("三大法人合計", -1),
+        }
+        
+        investor_key = investor_type.lower()
+        if investor_key not in investor_map:
+            await ctx.send(f"❌ 無效的法人類型: {investor_type}\n請使用：外資、投信、自營商、全部")
+            return
+        
+        investor_name, col_index = investor_map[investor_key]
+        
+        if days > 10:
+            days = 10  # 限制最多 10 天
+            
+        await ctx.send(f"正在查詢 {stock_code} 近 {days} 天的【{investor_name}】籌碼趨勢...")
+        
+        # 取得最近 N 個交易日的資料
+        from datetime import timedelta
+        
+        today = datetime.now(TW_TZ)
+        trend_data = []
+        seen_dates = set()  # 追蹤已經處理過的實際資料日期
+        check_date = today
+        attempts = 0
+        max_attempts = days * 3  # 避免無限迴圈（考慮假日）
+        
+        while len(trend_data) < days and attempts < max_attempts:
+            date_str = check_date.strftime("%Y%m%d")
+            t86_data = await self.fetch_stock_chip_data(date_str)
+            
+            if t86_data and t86_data.get("stat") == "OK":
+                # 檢查回傳的實際日期，避免假日重複資料
+                actual_date = t86_data.get("date", "")
+                
+                if actual_date and actual_date not in seen_dates:
+                    seen_dates.add(actual_date)
+                    
+                    # 尋找該股票
+                    for record in t86_data.get("data", []):
+                        if record[0].strip() == stock_code:
+                            try:
+                                net = int(record[col_index].replace(",", ""))
+                                trend_data.append({
+                                    "date": actual_date,  # 使用實際日期
+                                    "net": net,
+                                    "name": record[1].strip()
+                                })
+                            except:
+                                pass
+                            break
+            
+            check_date -= timedelta(days=1)
+            attempts += 1
+        
+        if not trend_data:
+            await ctx.send(f"找不到 {stock_code} 的籌碼資料")
+            return
+        
+        # 反轉順序（從舊到新）
+        trend_data.reverse()
+        
+        stock_name = trend_data[0].get("name", stock_code)
+        
+        embed = discord.Embed(
+            title=f"📈 {stock_name} ({stock_code}) 【{investor_name}】籌碼趨勢",
+            description=f"近 {len(trend_data)} 個交易日",
+            color=discord.Color.gold(),
+            timestamp=datetime.now(TW_TZ)
+        )
+        
+        # 建立趨勢圖表（文字版）
+        trend_text = ""
+        prev_net = None
+        for item in trend_data:
+            date_display = f"{item['date'][4:6]}/{item['date'][6:]}"
+            net = item["net"]
+            
+            # 決定趨勢符號
+            if prev_net is None:
+                trend_emoji = "⏺️"
+            elif net > prev_net:
+                trend_emoji = "📈"
+            elif net < prev_net:
+                trend_emoji = "📉"
+            else:
+                trend_emoji = "➡️"
+            
+            # 買超/賣超顏色
+            status_emoji = "🟢" if net >= 0 else "🔴"
+            
+            trend_text += f"{trend_emoji} {date_display}: {status_emoji} `{net:+,}` 股\n"
+            prev_net = net
+        
+        embed.add_field(name=f"{investor_name}買賣超趨勢", value=trend_text, inline=False)
+        
+        # 計算統計
+        total = sum(item["net"] for item in trend_data)
+        avg = total / len(trend_data)
+        
+        stats_text = f"合計: `{total:+,}` 股\n平均: `{avg:+,.0f}` 股/日"
+        embed.add_field(name="📊 統計", value=stats_text, inline=False)
         
         embed.set_footer(text="資料來源: 證交所 T86")
         

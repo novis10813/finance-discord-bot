@@ -27,4 +27,7 @@ LOG_FILE = os.getenv("LOG_FILE", "logs/bot.log")
 # Cogs 設定
 COGS_DIR = os.getenv("COGS_DIR", "cogs")
 AUTO_LOAD_COGS = os.getenv("AUTO_LOAD_COGS", "True").lower() == "true"
+CHIP_CHANNEL_ID = int(os.getenv("CHIP_CHANNEL_ID", ""))
 
+# 排程器設定
+SCHEDULER_TASKS_FILE = os.getenv("SCHEDULER_TASKS_FILE", "data/scheduled_tasks.json")

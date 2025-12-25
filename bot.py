@@ -10,6 +10,7 @@ from typing import Optional
 
 from config import BOT_TOKEN, COMMAND_PREFIX, COGS_DIR, AUTO_LOAD_COGS
 from utils.logger import setup_logger
+from utils.scheduler import get_scheduler
 
 logger = setup_logger()
 
@@ -28,6 +29,9 @@ class DiscordBot(commands.Bot):
             description="A Discord bot built with discord.py",
             help_command=commands.DefaultHelpCommand()
         )
+        
+        # 初始化排程器
+        self.scheduler = get_scheduler(self)
     
     async def setup_hook(self):
         """Bot 啟動前的設定"""
@@ -35,6 +39,9 @@ class DiscordBot(commands.Bot):
         if AUTO_LOAD_COGS:
             await self.load_cogs()
         logger.info("Cogs 載入完成")
+        
+        # 啟動排程器
+        self.scheduler.start()
     
     async def load_cogs(self):
         """自動載入 cogs 資料夾中的所有 cog"""
@@ -103,5 +110,7 @@ class DiscordBot(commands.Bot):
     async def close(self):
         """Bot 關閉時的清理工作"""
         logger.info("Bot 正在關閉...")
+        # 關閉排程器
+        self.scheduler.shutdown()
         await super().close()
 

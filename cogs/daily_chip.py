@@ -1,7 +1,6 @@
 """
 每日台股籌碼分析 Cog
 """
-import httpx
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, time, timezone, timedelta
@@ -9,6 +8,8 @@ from typing import Optional, Dict, Any
 
 from config import CHIP_CHANNEL_ID
 from utils.logger import setup_logger
+from utils.http import fetch_twse_data, HTTPError, APIError
+from utils.cache import get_cache
 
 logger = setup_logger("cogs.daily_chip")
 
@@ -44,22 +45,22 @@ class DailyChip(commands.Cog):
         """
         if not date_str:
             date_str = datetime.now(TW_TZ).strftime("%Y%m%d")
-            
-        # 注意：使用 dayDate 參數而非 date（TWSE 網站使用此參數名）
-        url = f"https://www.twse.com.tw/fund/BFI82U?response=json&dayDate={date_str}"
         
+        # 嘗試從快取取得
+        cache = get_cache()
+        cache_key = f"BFI82U_{date_str}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return cached_data
+            
         try:
-            # TWSE 有時會有 SSL 驗證問題，這裡暫時忽略驗證
-            async with httpx.AsyncClient(verify=False) as client:
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-                
-                if data.get("stat") != "OK":
-                    logger.warning(f"取得籌碼資料失敗: {data.get('stat')} (日期: {date_str})")
-                    return None
-                    
-                return data
+            data = await fetch_twse_data("BFI82U", {"dayDate": date_str})
+            # 寫入快取
+            cache.set(cache_key, data, date_str)
+            return data
+        except (HTTPError, APIError) as e:
+            logger.warning(f"取得籌碼資料失敗: {e.message} (日期: {date_str})")
+            return None
         except Exception as e:
             logger.error(f"抓取籌碼資料發生錯誤: {e}")
             return None
@@ -76,24 +77,30 @@ class DailyChip(commands.Cog):
         """
         if not date_str:
             date_str = datetime.now(TW_TZ).strftime("%Y%m%d")
-            
-        # selectType=ALL (所有證券)，使用 dayDate 參數
-        url = f"https://www.twse.com.tw/fund/T86?response=json&selectType=ALL&dayDate={date_str}"
         
+        # 嘗試從快取取得
+        cache = get_cache()
+        cache_key = f"T86_{date_str}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return cached_data
+            
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                response = await client.get(url, timeout=30.0) # T86 資料較大，增加 timeout
-                response.raise_for_status()
-                data = response.json()
-                
-                if data.get("stat") != "OK":
-                    logger.warning(f"取得個股籌碼資料失敗: {data.get('stat')} (日期: {date_str})")
-                    return None
-                    
-                return data
+            data = await fetch_twse_data(
+                "T86", 
+                {"selectType": "ALL", "dayDate": date_str},
+                timeout=30.0  # T86 資料較大，增加 timeout
+            )
+            # 寫入快取
+            cache.set(cache_key, data, date_str)
+            return data
+        except (HTTPError, APIError) as e:
+            logger.warning(f"取得個股籌碼資料失敗: {e.message} (日期: {date_str})")
+            return None
         except Exception as e:
             logger.error(f"抓取個股籌碼資料發生錯誤: {e}")
             return None
+
 
     def format_stock_rank_embed(self, stock_data: Dict[str, Any], embed: discord.Embed) -> discord.Embed:
         """
@@ -259,7 +266,7 @@ class DailyChip(commands.Cog):
             logger.warning(f"找不到標籤 '{self.target_tag_name}'，將發送無標籤貼文")
 
         # 5. 建立貼文
-        thread_name = f"📅 {date_str} 三大法人籌碼日報"
+        thread_name = f"📅 {date_display} 三大法人籌碼日報"
         try:
             await channel.create_thread(
                 name=thread_name,
@@ -296,6 +303,127 @@ class DailyChip(commands.Cog):
         if t86_data and t86_data.get("stat") == "OK":
             embed = self.format_stock_rank_embed(t86_data, embed)
             
+        await ctx.send(embed=embed)
+
+    @commands.command(name="chip_stock", aliases=["chip_detail", "股票籌碼"])
+    async def stock_chip_detail(self, ctx: commands.Context, stock_code: str, date_str: str = None):
+        """
+        查詢個股籌碼詳情
+        
+        Args:
+            stock_code: 股票代碼（如 2330）
+            date_str: 日期 (YYYYMMDD)，預設為今日
+        """
+        if not stock_code:
+            await ctx.send("請提供股票代碼，例如：`!chip_stock 2330`")
+            return
+            
+        await ctx.send(f"正在查詢 {stock_code} 的籌碼資料...")
+        
+        if not date_str:
+            date_str = datetime.now(TW_TZ).strftime("%Y%m%d")
+        
+        t86_data = await self.fetch_stock_chip_data(date_str)
+        
+        if not t86_data:
+            await ctx.send(f"查無資料 (日期: {date_str})")
+            return
+            
+        # 在資料中尋找該股票
+        records = t86_data.get("data", [])
+        stock_record = None
+        
+        for record in records:
+            if record[0].strip() == stock_code:
+                stock_record = record
+                break
+                
+        if not stock_record:
+            await ctx.send(f"找不到股票代碼 {stock_code} 的籌碼資料")
+            return
+        
+        # 解析資料
+        # fields: ["證券代號","證券名稱",
+        #   "外陸資買進股數(不含外資自營商)","外陸資賣出股數(不含外資自營商)","外陸資買賣超股數(不含外資自營商)",
+        #   "外資自營商買進股數","外資自營商賣出股數","外資自營商買賣超股數",
+        #   "投信買進股數","投信賣出股數","投信買賣超股數",
+        #   "自營商買賣超股數","自營商買進股數(自行買賣)","自營商賣出股數(自行買賣)","自營商買賣超股數(自行買賣)",
+        #   "自營商買進股數(避險)","自營商賣出股數(避險)","自營商買賣超股數(避險)",
+        #   "三大法人買賣超股數"]
+        
+        code = stock_record[0].strip()
+        name = stock_record[1].strip()
+        
+        # 外資
+        foreign_buy = stock_record[2]
+        foreign_sell = stock_record[3]
+        foreign_net = stock_record[4]
+        
+        # 投信
+        trust_buy = stock_record[8]
+        trust_sell = stock_record[9]
+        trust_net = stock_record[10]
+        
+        # 自營商
+        dealer_net = stock_record[11]
+        
+        # 三大法人合計
+        total_net = stock_record[-1]
+        
+        # 建立 Embed
+        date_display = f"{date_str[:4]}/{date_str[4:6]}/{date_str[6:]}"
+        
+        def format_num(s: str) -> str:
+            """格式化數字，加上正負號"""
+            try:
+                val = int(s.replace(",", ""))
+                if val > 0:
+                    return f"+{s}"
+                return s
+            except:
+                return s
+        
+        embed = discord.Embed(
+            title=f"📊 {name} ({code}) 籌碼詳情",
+            description=f"日期: {date_display}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(TW_TZ)
+        )
+        
+        # 外資
+        foreign_emoji = "🟢" if not foreign_net.startswith("-") else "🔴"
+        embed.add_field(
+            name=f"{foreign_emoji} 外資",
+            value=f"買進: {foreign_buy}\n賣出: {foreign_sell}\n買賣超: `{format_num(foreign_net)}`",
+            inline=True
+        )
+        
+        # 投信
+        trust_emoji = "🟢" if not trust_net.startswith("-") else "🔴"
+        embed.add_field(
+            name=f"{trust_emoji} 投信",
+            value=f"買進: {trust_buy}\n賣出: {trust_sell}\n買賣超: `{format_num(trust_net)}`",
+            inline=True
+        )
+        
+        # 自營商
+        dealer_emoji = "🟢" if not dealer_net.startswith("-") else "🔴"
+        embed.add_field(
+            name=f"{dealer_emoji} 自營商",
+            value=f"買賣超: `{format_num(dealer_net)}`",
+            inline=True
+        )
+        
+        # 三大法人合計
+        total_emoji = "🟢" if not total_net.startswith("-") else "🔴"
+        embed.add_field(
+            name=f"{total_emoji} 三大法人合計",
+            value=f"`{format_num(total_net)}` 股",
+            inline=False
+        )
+        
+        embed.set_footer(text="資料來源: 證交所 T86")
+        
         await ctx.send(embed=embed)
 
 async def setup(bot: commands.Bot):

@@ -38,3 +38,19 @@ CHIP_ALLOWED_CHANNELS = set(
 
 # 排程器設定
 SCHEDULER_TASKS_FILE = os.getenv("SCHEDULER_TASKS_FILE", "data/scheduled_tasks.json")
+
+# TWSE API 服務設定 (for future microservice integration)
+TWSE_API_URL = os.getenv("TWSE_API_URL", "http://twse-api:8000")
+
+
+# LLM 設定
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
+
+# 金融資訊來源設定
+YOUTUBE_SOURCE_ENDPOINT = os.getenv("YOUTUBE_SOURCE_ENDPOINT", "")
+YOUTUBE_SOURCE_API_KEY = os.getenv("YOUTUBE_SOURCE_API_KEY", "")
+
+# 摘要發送頻道 (Forum Channel ID)
+# 如果未設定，預設使用 CHIP_CHANNEL_ID (或者您可以設定單獨的變數)
+FINANCE_CHANNEL_ID = int(os.getenv("FINANCE_CHANNEL_ID") or os.getenv("CHIP_CHANNEL_ID", "0"))

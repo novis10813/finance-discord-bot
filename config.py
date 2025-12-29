@@ -38,3 +38,9 @@ CHIP_ALLOWED_CHANNELS = set(
 
 # TWSE API 服務設定
 TWSE_API_URL = os.getenv("TWSE_API_URL", "http://twse-api:8000")
+
+# 金融摘要功能設定
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
+YOUTUBE_SOURCE_ENDPOINT = os.getenv("YOUTUBE_SOURCE_ENDPOINT", "http://yt-transcript-api:8001")
+FINANCE_CHANNEL_ID = int(os.getenv("FINANCE_CHANNEL_ID", "0"))

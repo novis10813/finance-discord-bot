@@ -230,13 +230,23 @@ async def my_command(self, ctx: commands.Context):
 
 **使用方式**：詳見 [docs/chip.md](docs/chip.md)
 
-### 2. 金融資訊 Summary
+### 2. 金融資訊 Summary ✅ 已完成
 
-- 整合多個金融資料來源（台股、美股、加密貨幣等）
-- 提供市場概況摘要（大盤指數、成交量、漲跌家數等）
-- 重要財經新聞摘要與分類
-- 個股/標的快速查詢功能
-- 支援自訂關注清單，定期推送相關資訊
+- ✅ 自動從 YouTube 頻道（游庭皓的財經皓角）獲取最新直播影片
+- ✅ 使用 AI（OpenRouter）自動摘要影片內容
+- ✅ 結構化 Markdown 格式輸出（核心主題、子主題、關鍵數據）
+- ✅ 週一至週五 12:00 PM（台灣時間）自動發送到 Discord
+- ✅ 支援手動觸發指令 `!daily_finance`
+- ✅ 支援 Forum Channel 自動建立討論串
+
+**環境變數設定**：
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=tngtech/deepseek-r1t2-chimera:free
+YOUTUBE_SOURCE_ENDPOINT=http://yt-transcript-api:8001
+FINANCE_CHANNEL_ID=your_channel_id
+```
+
 
 ### 3. 因子回測平台
 

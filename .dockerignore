@@ -9,3 +9,5 @@ logs/
 .cursor/
 .github/
 data/
+
+!README.md

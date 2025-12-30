@@ -23,13 +23,19 @@ class LLMService:
         )
         self.model = OPENROUTER_MODEL
         
-    async def generate_summary(self, text: str, system_prompt: str) -> Optional[str]:
+    async def generate_summary(
+        self, 
+        text: str, 
+        system_prompt: str,
+        user_prompt: str = None
+    ) -> Optional[str]:
         """
         Generate summary using LLM
         
         Args:
             text: Input text to summarize
             system_prompt: System prompt for the LLM
+            user_prompt: Optional custom user prompt. If not provided, uses default.
             
         Returns:
             str: Generated summary
@@ -40,7 +46,9 @@ class LLMService:
         try:
             logger.info(f"Generating summary with model: {self.model}")
             
-            user_prompt = f"""請你幫我整理以下文字的重點，整個過程可以分為以下幾個重點： 
+            # 如果沒有提供自定義 user prompt，使用預設的
+            if user_prompt is None:
+                user_prompt = f"""請你幫我整理以下文字的重點，整個過程可以分為以下幾個重點： 
 
 ## 辨識核心主題與架構
 

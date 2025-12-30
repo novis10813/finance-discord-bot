@@ -44,3 +44,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
 YOUTUBE_SOURCE_ENDPOINT = os.getenv("YOUTUBE_SOURCE_ENDPOINT", "http://yt-transcript-api:8001")
 FINANCE_CHANNEL_ID = int(os.getenv("FINANCE_CHANNEL_ID") or 0)
+
+# Webhook 接收設定 (for source-aggregator)
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")

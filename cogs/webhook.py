@@ -1,0 +1,184 @@
+"""
+Webhook Receiver Cog
+接收 source-aggregator 推送的資料並進行摘要
+"""
+import os
+import asyncio
+from typing import Optional
+
+import discord
+from discord.ext import commands
+from aiohttp import web
+
+from config import FINANCE_CHANNEL_ID, CHIP_CHANNEL_ID
+from utils.logger import setup_logger
+from schemas.source import SourceItem
+from services.llm import get_llm_service
+from services.prompt import get_prompt_service
+
+logger = setup_logger("cogs.webhook")
+
+# Webhook 設定
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+
+
+class WebhookReceiver(commands.Cog):
+    """Webhook 接收器 - 接收 source-aggregator 推送的資料"""
+    
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.channel_id = FINANCE_CHANNEL_ID or CHIP_CHANNEL_ID
+        self.target_tag_name = "財經新聞"
+        self.llm = get_llm_service()
+        self.prompt_service = get_prompt_service()
+        
+        # Web server
+        self.app = web.Application()
+        self.app.router.add_post("/webhook/source", self.handle_source)
+        self.app.router.add_get("/health", self.health_check)
+        self.runner: Optional[web.AppRunner] = None
+        self.site: Optional[web.TCPSite] = None
+    
+    async def cog_load(self):
+        """Cog 載入時啟動 web server"""
+        await self._start_server()
+        logger.info(f"Webhook server started on port {WEBHOOK_PORT}")
+    
+    async def cog_unload(self):
+        """Cog 卸載時關閉 web server"""
+        await self._stop_server()
+        logger.info("Webhook server stopped")
+    
+    async def _start_server(self):
+        """啟動 aiohttp web server"""
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        self.site = web.TCPSite(self.runner, "0.0.0.0", WEBHOOK_PORT)
+        await self.site.start()
+    
+    async def _stop_server(self):
+        """停止 aiohttp web server"""
+        if self.site:
+            await self.site.stop()
+        if self.runner:
+            await self.runner.cleanup()
+    
+    async def health_check(self, request: web.Request) -> web.Response:
+        """健康檢查端點"""
+        return web.json_response({
+            "status": "healthy",
+            "service": "finance-discord-bot-webhook"
+        })
+    
+    async def handle_source(self, request: web.Request) -> web.Response:
+        """
+        處理 source-aggregator 推送的資料
+        
+        1. 驗證請求
+        2. 解析 SourceItem
+        3. 根據來源取得對應 prompt
+        4. 調用 LLM 生成摘要
+        5. 發送到 Discord
+        """
+        # 驗證 webhook secret (如果有設定)
+        if WEBHOOK_SECRET:
+            request_secret = request.headers.get("X-Webhook-Secret", "")
+            if request_secret != WEBHOOK_SECRET:
+                logger.warning("Invalid webhook secret")
+                return web.json_response(
+                    {"error": "Invalid secret"}, 
+                    status=401
+                )
+        
+        try:
+            # 解析請求資料
+            data = await request.json()
+            item = SourceItem(**data)
+            
+            logger.info(f"Received item: {item.source_name} - {item.title[:50]}")
+            
+            # 取得對應的 prompt
+            prompts = self.prompt_service.get_prompts(item.source_name)
+            system_prompt = prompts["system"]
+            user_prompt = self.prompt_service.format_user_prompt(
+                item.source_name, 
+                item.content
+            )
+            
+            # 生成摘要
+            summary = await self.llm.generate_summary(
+                text=item.content,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt
+            )
+            
+            if not summary:
+                logger.error(f"Failed to generate summary for: {item.title}")
+                return web.json_response(
+                    {"error": "Summary generation failed"}, 
+                    status=500
+                )
+            
+            # 發送到 Discord
+            await self._post_to_discord(item, summary)
+            
+            return web.json_response({"status": "ok"})
+            
+        except Exception as e:
+            logger.error(f"Error handling webhook: {e}")
+            return web.json_response(
+                {"error": str(e)}, 
+                status=500
+            )
+    
+    async def _post_to_discord(self, item: SourceItem, summary: str):
+        """發送摘要到 Discord Forum Channel"""
+        channel = self.bot.get_channel(self.channel_id)
+        
+        if not channel:
+            logger.error(f"Channel not found: {self.channel_id}")
+            return
+        
+        # 根據來源類型選擇 emoji
+        emoji = "📰" if item.source_type == "rss" else "📺"
+        
+        # 組裝訊息
+        header = f"**{emoji} [{item.title}]({item.url})**\n\n"
+        footer = f"\n\n---\n*{item.source_name} | Generated by AI*"
+        
+        # Discord 訊息限制 2000 字元
+        max_content_length = 2000 - len(header) - len(footer)
+        content = summary[:max_content_length] if len(summary) > max_content_length else summary
+        full_message = header + content + footer
+        
+        try:
+            if isinstance(channel, discord.ForumChannel):
+                # Forum Channel: 建立新的 thread
+                target_tag = None
+                for tag in channel.available_tags:
+                    if tag.name == self.target_tag_name:
+                        target_tag = tag
+                        break
+                
+                tags = [target_tag] if target_tag else []
+                thread_name = f"{emoji} {item.title[:95]}"  # Thread name 限制 100 字元
+                
+                await channel.create_thread(
+                    name=thread_name,
+                    content=full_message,
+                    applied_tags=tags
+                )
+            else:
+                # 一般 Text Channel
+                await channel.send(full_message)
+            
+            logger.info(f"Posted to Discord: {item.title[:50]}")
+            
+        except Exception as e:
+            logger.error(f"Error posting to Discord: {e}")
+            raise
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(WebhookReceiver(bot))

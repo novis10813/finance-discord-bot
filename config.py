@@ -38,6 +38,7 @@ CHIP_ALLOWED_CHANNELS = set(
 
 # TWSE API 服務設定
 TWSE_API_URL = os.getenv("TWSE_API_URL", "http://twse-api:8000")
+MOPS_API_URL = os.getenv("MOPS_API_URL", "http://mops-financial-api:8000")
 
 # 金融摘要功能設定
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")

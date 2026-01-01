@@ -49,3 +49,6 @@ FINANCE_CHANNEL_ID = int(os.getenv("FINANCE_CHANNEL_ID") or 0)
 # Webhook 接收設定 (for source-aggregator)
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+
+# Admin 設定 - Bot 擁有者的 Discord User ID
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))

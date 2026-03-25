@@ -14,8 +14,14 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
+# Create logs directory and external_cogs directory for hot-swappable plugins
+RUN mkdir -p logs external_cogs
+
+# Mount point for hot-swappable external Cogs
+# Docker Compose example:
+#   volumes:
+#     - ./my_plugins:/app/external_cogs
+VOLUME /app/external_cogs
 
 # Run bot
 CMD ["uv", "run", "python", "main.py"]

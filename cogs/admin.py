@@ -67,7 +67,6 @@ class Admin(commands.Cog):
         cog_name = self._full_ext_name(cog)
         try:
             await self.bot.load_extension(cog_name)
-            self.bot.register_ai_tools()
             await ctx.send(f"✅ 已載入 `{cog_name}`")
             logger.info(f"External Cog loaded: {cog_name} (by {ctx.author})")
         except commands.ExtensionAlreadyLoaded:
@@ -89,7 +88,6 @@ class Admin(commands.Cog):
 
         try:
             await self.bot.unload_extension(cog_name)
-            self.bot.register_ai_tools()
             await ctx.send(f"✅ 已卸載 `{cog_name}`")
             logger.info(f"External Cog unloaded: {cog_name} (by {ctx.author})")
         except commands.ExtensionNotLoaded:
@@ -109,14 +107,12 @@ class Admin(commands.Cog):
 
         try:
             await self.bot.reload_extension(cog_name)
-            self.bot.register_ai_tools()
             await ctx.send(f"✅ 已重新載入 `{cog_name}`")
             logger.info(f"External Cog reloaded: {cog_name} (by {ctx.author})")
         except commands.ExtensionNotLoaded:
             # 尚未載入，嘗試直接載入
             try:
                 await self.bot.load_extension(cog_name)
-                self.bot.register_ai_tools()
                 await ctx.send(f"✅ 已載入 `{cog_name}` (原本未載入)")
                 logger.info(f"External Cog loaded via reload: {cog_name} (by {ctx.author})")
             except Exception as e:

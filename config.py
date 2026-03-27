@@ -52,3 +52,6 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 # Admin 設定 - Bot 擁有者的 Discord User ID
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+# 外部 Cogs 設定
+EXTERNAL_COGS_DIR = os.getenv("EXTERNAL_COGS_DIR", "external_cogs")
